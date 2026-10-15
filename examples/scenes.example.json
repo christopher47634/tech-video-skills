@@ -1,0 +1,13 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "scenes": [
+    {"id": "s0", "start": 0.0,  "end": 4.0},
+    {"id": "s1", "start": 4.0,  "end": 9.0},
+    {"id": "s2", "start": 9.0,  "end": 14.5},
+    {"id": "s3", "start": 14.5, "end": 19.0},
+    {"id": "s4", "start": 19.0, "end": 22.0},
+    {"id": "s5", "start": 22.0, "end": 23.5}
+  ]
+}
