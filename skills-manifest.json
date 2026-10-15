@@ -1,0 +1,23 @@
+{
+  "$comment": "技能清单。type=doc 为纯文档条目；type=skill 的 path 必须指向带 YAML frontmatter（name、description）的 SKILL.md。",
+  "version": "1.0.0",
+  "repository": "christopher47634/tech-video-skills",
+  "skills": [
+    {
+      "id": "tech-video-production",
+      "title": "技术科普视频程序化生产工作流",
+      "type": "doc",
+      "path": "README.md",
+      "description": "HTML/CSS 动画 + Playwright 逐帧截图 + FFmpeg 合成的 6 步工作流、组件库与踩坑记录",
+      "tags": ["html", "playwright", "ffmpeg", "edge-tts"]
+    },
+    {
+      "id": "tech-video-overview",
+      "title": "项目简介与快速开始",
+      "type": "doc",
+      "path": "ABOUT.md",
+      "description": "依赖安装与内容概览",
+      "tags": ["overview"]
+    }
+  ]
+}

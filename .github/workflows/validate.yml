@@ -1,0 +1,19 @@
+name: Validate
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 校验 skills-manifest.json 与 SKILL.md frontmatter
+        run: node scripts/validate-manifest.mjs
+      - name: 单元测试
+        run: node --test test/*.test.mjs

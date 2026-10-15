@@ -924,6 +924,19 @@ FFmpeg tremolo filter 的 `f` 参数最小值 0.1，低于此值报 `Numerical r
 
 ---
 
+## 技能清单与校验
+
+`skills-manifest.json` 登记本仓库发布的技能/文档条目（id、title、type、path、description）。`type: "skill"` 的条目必须指向带 YAML frontmatter（`name`、`description`）的 `SKILL.md`；新增的 `SKILL.md` 必须登记进清单。
+
+```bash
+node scripts/validate-manifest.mjs   # 校验清单结构、文件存在性、frontmatter
+node --test test/*.test.mjs          # 校验脚本自身的单测
+```
+
+CI（`.github/workflows/validate.yml`）在每次推送时自动运行。第三方依赖与授权说明见 [NOTICE.md](NOTICE.md)。
+
+---
+
 ## 许可证
 
 MIT
