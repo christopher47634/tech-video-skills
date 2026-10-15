@@ -1,10 +1,14 @@
 # Tech Video Skills
 
+> **维护状态：文档存档。** 后续维护已并入 [glassmotion](https://github.com/christopher47634/glassmotion)（截帧、混音脚本与踩坑文档见其 `docs/`）。本仓库保留为早期文档版存档，只修正确性问题，不再加新功能。
+
 用 HTML/CSS 动画 + Playwright 逐帧截图 + FFmpeg 合成，程序化生产高质量技术科普视频。
 
-不依赖 Premiere、After Effects、Remotion 或任何 npm 生态。纯 Python + Chromium + FFmpeg。
+渲染管线不需要 Premiere、After Effects 或 Remotion，只用 Python + Chromium + FFmpeg；视频生产本身不需要 Node.js / npm（仓库里的 `scripts/*.mjs` 只是清单校验工具，用 Node 运行，与出片无关）。
 
-## 效果预览
+所有步骤都有可直接运行的脚本，见 [`examples/`](examples/)（下文的代码块与之一一对应）。
+
+## 适用场景
 
 适用于：产品介绍、技术科普、数据可视化、社媒短视频、教程演示。
 
@@ -15,6 +19,7 @@
 ## 目录
 
 - [工作流总览](#工作流总览)
+- [可运行示例](#可运行示例)
 - [环境准备](#环境准备)
 - [Step 1: 生成 TTS 语音 + 字幕](#step-1-生成-tts-语音--字幕)
 - [Step 2: 编写 HTML 场景](#step-2-编写-html-场景)
@@ -57,7 +62,36 @@ SFX 生成 (FFmpeg 合成) + BGM 素材
 替换音轨 → 最终输出 MP4
 ```
 
-**核心理念**：HTML 写场景，Playwright 截帧，FFmpeg 合成。不碰 npm，不碰 Remotion，不碰 After Effects。
+**核心理念**：HTML 写场景，Playwright 截帧，FFmpeg 合成。不用 Remotion，不用 After Effects。
+
+---
+
+## 可运行示例
+
+| 脚本 | 对应步骤 |
+|------|---------|
+| `examples/tts.py` | Step 1：edge-tts 生成配音 + 字幕（`--file` 传稿子） |
+| `examples/scenes.example.html` + `scenes.example.json` | Step 2：场景 HTML（`seekTo(t)` 纯函数）与场景时间配置 |
+| `examples/capture.py` | Step 3：Playwright 逐帧截图，场景时间从 JSON 读，任一帧失败即非零退出 |
+| `examples/encode.py` | Step 4：帧序列 + 配音编码 MP4 |
+| `examples/gen_sfx.py` | Step 5：合成 SFX 并用 volumedetect 校验 |
+| `examples/mix.py` + `sfx_schedule.example.json` | Step 6：单次 amix（normalize=0）混音 |
+| `examples/volume.py` | 读取任意音频的 max_volume |
+
+所有外部命令都以参数列表调用（不经 shell）并 `check=True`，任何一步 ffmpeg 失败都会直接报错退出。
+
+```bash
+cd examples
+pip install -r requirements.txt && playwright install chromium
+python tts.py script.txt --out-dir build
+python capture.py scenes.example.html --scenes scenes.example.json --vtt build/voiceover.vtt --out build/frames
+python encode.py build/frames build/voiceover.mp3 build/output.mp4
+python gen_sfx.py --out-dir sfx
+python mix.py build/voiceover.mp3 --schedule sfx_schedule.example.json --bgm bgm.wav -o build/mixed-audio.wav
+python volume.py build/voiceover.mp3 build/mixed-audio.wav
+```
+
+CI 会对 `examples/*.py` 做 `py_compile`、跑单测，并实际合成一遍 SFX。
 
 ---
 
@@ -66,31 +100,27 @@ SFX 生成 (FFmpeg 合成) + BGM 素材
 ### 依赖
 
 ```bash
-# Python 3.10+
-pip install playwright
+# Python 3.10+，版本已在 examples/requirements.txt 固定（playwright、edge-tts）
+pip install -r examples/requirements.txt
 
-# Playwright 浏览器
+# Playwright 自带的 Chromium（默认使用这个）
 playwright install chromium
-# 或者用系统 Chromium（WSL 推荐）:
-sudo snap install chromium
 
-# TTS
-pip install edge-tts
-
-# FFmpeg
+# FFmpeg ≥ 4.4（amix 的 normalize 选项从 4.4 起才有，见 Step 6）
 sudo apt install ffmpeg
+ffmpeg -version | head -1
 ```
 
-### WSL 特殊配置
+edge-tts 调用的是微软在线服务，**没有离线回退**：断网或服务端拒绝（实测会出现 HTTP 403）时 `tts.py` 会非零退出，不会产出空文件。需要离线时请换本地 TTS，再按同样格式提供 `voiceover.mp3` + `voiceover.vtt`。
 
-Playwright 自带的 Chromium 在 WSL 下路径会指向 Windows temp 目录导致报错。必须指定系统 Chromium：
+### 指定浏览器（可选）
 
-```python
-browser = p.chromium.launch(
-    headless=True,
-    executable_path='/snap/bin/chromium',  # WSL 必须指定
-    args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-)
+默认用 `playwright install chromium` 下载的浏览器。如果某个环境里它不可用（例如个别 WSL 配置下启动失败），用参数或环境变量指定系统 Chromium，不要在代码里写死路径：
+
+```bash
+python examples/capture.py scenes.html --scenes scenes.json --chromium "$(command -v chromium)"
+# 或
+export CHROMIUM_PATH=/usr/bin/chromium
 ```
 
 ### 字体
@@ -100,9 +130,9 @@ browser = p.chromium.launch(
 推荐 [LXGW WenKai](https://github.com/lxgw/LxgwWenKai)：
 
 ```bash
-# 下载字体
-mkdir -p ~/.local/share/fonts
-wget -O ~/.local/share/fonts/LXGWWenKai-Regular.ttf \
+# 下载字体到场景 HTML 旁边的 fonts/ 目录，HTML 里用相对路径引用（不写个人绝对路径）
+mkdir -p fonts
+wget -O fonts/LXGWWenKai-Regular.ttf \
   "https://github.com/lxgw/LxgwWenKai/releases/download/v1.330/LXGWWenKai-Regular.ttf"
 ```
 
@@ -112,21 +142,23 @@ wget -O ~/.local/share/fonts/LXGWWenKai-Regular.ttf \
 
 ```bash
 edge-tts --voice zh-CN-XiaoxiaoNeural \
-  --text "$(cat script.txt)" \
+  --file script.txt \
   --write-media voiceover.mp3 \
   --write-subtitles voiceover.vtt
 ```
 
+用 `--file` 传稿子，**不要用 `--text "$(cat script.txt)"`**：稿子以 `-` 开头会被当成命令行选项，含引号、`$`、反引号时还会被 shell 再解释一遍。对应脚本 `examples/tts.py`（它还会校验生成的字幕没有时间重叠）。
+
 `--write-subtitles` 同时生成精确的 VTT 时间戳，后续字幕和场景边界都依赖它。
 
-**不要加 `--rate`**。原始语速最自然。如果用户要求快节奏才加 `--rate="+15%"`，此时必须同时重新生成 media 和 subtitles——两个文件的时间戳完全不同，不能混用。
+**不要加 `--rate`**。原始语速最自然。如果用户要求快节奏才加 `--rate=+15%`（用 `=` 连写，避免 `-10%` 这类负值被当成选项），此时必须同时重新生成 media 和 subtitles——两个文件的时间戳完全不同，不能混用。
 
 ### VTT 示例
 
 ```
 WEBVTT
 
-00:00:00.100 --> 00:00:03.587
+00:00:00.100 --> 00:00:03.537
 Vibe Coding，是一种全新的编程方式
 
 00:00:03.537 --> 00:00:08.075
@@ -137,11 +169,13 @@ Vibe Coding，是一种全新的编程方式
 
 ```python
 SUBTITLES = [
-    [0.100, 3.587, "Vibe Coding，是一种全新的编程方式"],
+    [0.100, 3.537, "Vibe Coding，是一种全新的编程方式"],
     [3.537, 8.075, "你不需要写每一行代码，只需要描述你想要什么"],
     # ...
 ]
 ```
+
+相邻两条字幕必须满足「下一条开始 ≥ 上一条结束」，否则两条会同时满足 `start <= t <= end`，画面上字幕闪烁或取错。`examples/common.py` 的 `parse_vtt` 遇到重叠会直接报错。
 
 ---
 
@@ -224,7 +258,7 @@ SUBTITLES = [
 ```css
 @font-face {
   font-family: 'LXGW WenKai';
-  src: url('file:///home/YOUR_USER/.local/share/fonts/LXGWWenKai-Regular.ttf') format('truetype');
+  src: url('fonts/LXGWWenKai-Regular.ttf') format('truetype');  /* 相对于 scenes.html */
 }
 ```
 
@@ -234,142 +268,88 @@ SUBTITLES = [
 
 ## Step 3: Playwright 逐帧截图
 
-```python
-#!/usr/bin/env python3
-"""capture.py — Playwright frame capture."""
-import os, shutil, json
-from playwright.sync_api import sync_playwright
+完整脚本：[`examples/capture.py`](examples/capture.py)。要点：
 
-HTML_PATH = "/path/to/scenes.html"
-FRAMES_DIR = "/tmp/frames"
-FPS = 30
-DURATION = 23.5  # 秒
-W, H = 1920, 1080
-TOTAL_FRAMES = int(DURATION * FPS)
+- **场景时间不写在代码里**，统一放在 `scenes.json`（示例 `examples/scenes.example.json`），截图脚本、HTML、SFX 时间表都从这一份读：
 
-SUBTITLES = [
-    [0.100, 3.587, "字幕文本1"],
-    [3.537, 8.075, "字幕文本2"],
-]
-
-def main():
-    if os.path.exists(FRAMES_DIR):
-        shutil.rmtree(FRAMES_DIR)
-    os.makedirs(FRAMES_DIR)
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            executable_path='/snap/bin/chromium',
-            args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-        )
-        page = browser.new_page(viewport={'width': W, 'height': H})
-        page.goto(f'file://{HTML_PATH}')
-        page.wait_for_load_state('networkidle')
-
-        page.evaluate(f"window.SUBS = {json.dumps(SUBTITLES)};")
-
-        update_js = """
-        (time) => {
-          // 场景切换
-          document.querySelectorAll('.scene').forEach(s => s.classList.remove('active'));
-          let sceneId = time < 4 ? 's0' : time < 9 ? 's1' : time < 14.5 ? 's2'
-                      : time < 19 ? 's3' : time < 22 ? 's4' : 's5';
-          document.getElementById(sceneId).classList.add('active');
-
-          // HUD 时钟 + 进度条
-          let m = Math.floor(time/60), s = Math.floor(time%60);
-          document.getElementById('hudTime').textContent =
-            String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
-          document.getElementById('progressFill').style.width = (time/23.5*100)+'%';
-
-          // 字幕
-          let subEl = document.getElementById('subtitleText');
-          let txt = '';
-          for (let sub of window.SUBS) {
-            if (time >= sub[0] && time <= sub[1]) { txt = sub[2]; break; }
-          }
-          if (txt) { subEl.textContent = txt; subEl.classList.add('visible'); }
-          else { subEl.classList.remove('visible'); }
-
-          // 各场景动画（见下方"动画控制"章节）
-          // ...
-        }
-        """
-
-        for i in range(TOTAL_FRAMES):
-            t = i / FPS
-            page.evaluate(update_js, t)
-            page.wait_for_timeout(8)
-            page.screenshot(
-                path=os.path.join(FRAMES_DIR, f"frame_{i:05d}.png"),
-                clip={'x': 0, 'y': 0, 'width': W, 'height': H}
-            )
-
-        browser.close()
-
-if __name__ == "__main__":
-    main()
+```json
+{
+  "width": 1920, "height": 1080, "fps": 30,
+  "scenes": [
+    {"id": "s0", "start": 0.0, "end": 4.0},
+    {"id": "s1", "start": 4.0, "end": 9.0}
+  ]
+}
 ```
 
-### 动画控制
+- 总时长 = 最后一个场景的 `end`，总帧数 = `round(时长 × fps)`；
+- 脚本把 `scenes` 注入 `window.SCENES`、把 VTT 注入 `window.SUBS`，然后对每一帧调用 `window.seekTo(i / fps)` 再截图；
+- 浏览器优先级：`--chromium` 参数 > 环境变量 `CHROMIUM_PATH` > Playwright 自带 Chromium；
+- **任何一帧失败都会以非零状态退出并列出失败帧**，不会留下序号断档的帧序列让 FFmpeg 悄悄合成出跳帧视频。
 
-所有动画都在 `update_js` 中用 `classList.add('show')` 触发，CSS 负责过渡效果。
+```bash
+python examples/capture.py scenes.html --scenes scenes.json --vtt build/voiceover.vtt --out build/frames
+```
 
-**子元素交错入场（Stagger）**：
+核心循环：
+
+```python
+page.evaluate("([s, u]) => { window.SCENES = s; window.SUBS = u; }", [cfg["scenes"], subs])
+page.evaluate("document.fonts.ready")
+for i in range(total):
+    try:
+        page.evaluate("t => window.seekTo(t)", i / FPS)
+        page.screenshot(path=str(out / f"frame_{i:05d}.png"))
+    except Exception as e:
+        failed.append((i, str(e).splitlines()[0]))
+# 结束后 failed 非空 -> 打印失败帧并 sys.exit(1)
+```
+
+### 动画控制：seekTo(t) 必须是 t 的纯函数
+
+逐帧截图时浏览器的真实时钟和视频时间毫无关系。凡是依赖真实时间的东西——CSS `animation`/`transition`、`setTimeout`、`requestAnimationFrame`、`infinite` 循环——截出来的帧都取决于截图速度，不可复现。
+
+所以场景里的每个状态都要由 `t` 直接算出来：同一个 `t` 无论调用几次、以什么顺序调用，画面都一样（可以倒着截、跳着截、只重截某一段）。
 
 ```js
-// Scene 1: 终端行，每 0.35s 出现一行
-if (sceneId === 's1') {
-    let t = time - 4;
-    if (t > 0.2) document.querySelector('#s1 .terminal').classList.add('show');
-    for (let i = 0; i <= 9; i++) {
-        let e = document.getElementById('tl' + i);
-        if (e && t > 0.5 + i * 0.35) e.classList.add('show');
-    }
+// 通用：进度 0→1，带缓动
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const easeOut = p => 1 - Math.pow(1 - p, 3);
+function reveal(el, p, dy = 30) {          // p: 0..1
+  const e = easeOut(clamp01(p));
+  el.style.opacity = e;
+  el.style.transform = `translateY(${dy * (1 - e)}px)`;
 }
 
-// Scene 2: 代码行，每 0.18s 出现一行
-if (sceneId === 's2') {
-    let t = time - 9;
-    if (t > 0.2) document.querySelector('#s2 .editor-wrap').classList.add('show');
-    for (let i = 0; i <= 14; i++) {
-        let e = document.getElementById('cl' + i);
-        if (e && t > 0.8 + i * 0.18) e.classList.add('show');
-    }
-}
+function seekTo(t) {
+  const cur = window.SCENES.find(s => t >= s.start && t < s.end) || window.SCENES.at(-1);
+  document.querySelectorAll('.scene').forEach(el => el.classList.toggle('active', el.id === cur.id));
+  const local = t - cur.start;               // 场景内时间，不再硬编码 4 / 9 / 14.5
 
-// Scene 3: 对话气泡，每 0.9s 出现一条
-if (sceneId === 's3') {
-    let t = time - 14.5;
-    for (let i = 0; i <= 3; i++) {
-        let e = document.getElementById('msg' + i);
-        if (e && t > 0.3 + i * 0.9) e.classList.add('show');
-    }
-}
+  if (cur.id === 's1') {                     // 终端行，每 0.35s 一行
+    document.querySelectorAll('#s1 .terminal-line').forEach((el, i) =>
+      reveal(el, (local - 0.5 - i * 0.35) / 0.3, 0));
+  }
+  if (cur.id === 's4') {                     // 指标卡片 + 数字滚动
+    document.querySelectorAll('#s4 .metric-card').forEach((el, i) => {
+      const p = clamp01((local - 0.4 - i * 0.3) / 1.5);
+      reveal(el, p * 3);
+      el.querySelector('.metric-value').textContent = Math.round(p * el.dataset.target) + el.dataset.unit;
+      el.querySelector('.metric-bar-fill').style.width = (p * 100) + '%';
+    });
+  }
 
-// Scene 4: 指标卡片 + 数字滚动
-if (sceneId === 's4') {
-    let t = time - 19;
-    for (let i = 0; i <= 2; i++) {
-        let e = document.getElementById('mc' + i);
-        if (e && t > 0.4 + i * 0.3) {
-            e.classList.add('show');
-            let p = Math.min(1, (t - 0.4 - i * 0.3) / 1.5);
-            if (p > 0) {
-                // 数字滚动
-                document.getElementById('mv0').textContent = Math.round(p * 10) + 'x';
-                document.getElementById('mv1').textContent = Math.round(p * 95) + '%';
-                document.getElementById('mv2').textContent = Math.round(p * 5) + 'min';
-                // 进度条填充
-                document.getElementById('mb0').style.width = (p * 100) + '%';
-                document.getElementById('mb1').style.width = (p * 100) + '%';
-                document.getElementById('mb2').style.width = (p * 100) + '%';
-            }
-        }
-    }
+  const total = window.SCENES.at(-1).end;    // HUD 进度条，总时长来自配置
+  document.getElementById('progressFill').style.width = (t / total * 100) + '%';
+  const sub = window.SUBS.find(s => t >= s[0] && t < s[1]);   // 半开区间，避免相邻字幕同时命中
+  document.getElementById('subtitleText').textContent = sub ? sub[2] : '';
 }
+window.seekTo = seekTo;
 ```
+
+可直接打开运行的最小例子见 `examples/scenes.example.html`。
+
+> 早期版本用 `classList.add('show')` 触发 CSS `animation`，再 `wait_for_timeout(8)` 等它跑——这样每帧截到的是「动画实际跑了多少毫秒」，和 t 无关，截图快慢不同结果就不同。已改为上面的写法。下文组件库里的 `.show { animation: ... }` 仅用于浏览器里预览，出片时用 `reveal()` 这类函数按 t 设置样式。
 
 ### 交错间隔参考值
 
@@ -385,10 +365,12 @@ if (sceneId === 's4') {
 
 ## Step 4: FFmpeg 合成视频
 
+脚本：`examples/encode.py`。
+
 ```bash
-ffmpeg -y -framerate 30 -i /tmp/frames/frame_%05d.png -i voiceover.mp3 \
+ffmpeg -y -framerate 30 -i build/frames/frame_%05d.png -i build/voiceover.mp3 \
   -c:v libx264 -preset medium -crf 18 \
-  -c:a aac -b:a 192k -pix_fmt yuv420p -shortest output.mp4
+  -c:a aac -b:a 192k -pix_fmt yuv420p -shortest build/output.mp4
 ```
 
 参数说明：
@@ -403,58 +385,40 @@ ffmpeg -y -framerate 30 -i /tmp/frames/frame_%05d.png -i voiceover.mp3 \
 
 ### SFX 生成（FFmpeg 纯合成，零外部依赖）
 
+脚本：[`examples/gen_sfx.py`](examples/gen_sfx.py)。所有 ffmpeg 调用都是参数列表（不经 shell）+ `check=True`，合成失败会直接抛错，不会留下缺失或空的 wav。
+
+| 名称 | lavfi 源 | 滤镜 | 用途 |
+|------|---------|------|------|
+| whoosh | `anoisesrc=d=0.5:c=white:a=0.6` | `bandpass=f=2000:width_type=o:w=2,aecho=0.8:0.88:60:0.4,volume=3.0` | 场景切换 |
+| typing_key | `anoisesrc=d=0.04:c=pink:a=0.8` | `highpass=f=3000,lowpass=f=8000,volume=4.0` | 打字 |
+| pop | `sine=f=1000:d=0.12` | `volume=3.0` | 气泡弹出 |
+| tick | `sine=f=5000:d=0.03` | `volume=3.0` | 代码行出现 |
+| blip | `sine=f=1500:d=0.15` | `volume=3.0` | 数据卡片 |
+| chime | `sine=f=523:d=1.2` | `volume=2.0` | 结尾收束 |
+
 ```python
-import subprocess
+from common import ffmpeg   # ffmpeg(*args) = subprocess.run(["ffmpeg", "-y", ...], check=True)
 
-def run(cmd):
-    subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
-
-SFX_DIR = "./sfx"
-
-# 场景切换音效
-run(f"ffmpeg -y -f lavfi -i 'anoisesrc=d=0.5:c=white:a=0.6' "
-    f"-af 'bandpass=f=2000:width_type=o:w=2,aecho=0.8:0.88:60:0.4,volume=3.0' "
-    f"-ar 44100 {SFX_DIR}/whoosh.wav")
-
-# 打字音效
-run(f"ffmpeg -y -f lavfi -i 'anoisesrc=d=0.04:c=pink:a=0.8' "
-    f"-af 'highpass=f=3000,lowpass=f=8000,volume=4.0' "
-    f"-ar 44100 {SFX_DIR}/typing_key.wav")
-
-# 气泡弹出
-run(f"ffmpeg -y -f lavfi -i 'sine=f=1000:d=0.12' "
-    f"-af 'volume=3.0' "
-    f"-ar 44100 {SFX_DIR}/pop.wav")
-
-# 代码行出现
-run(f"ffmpeg -y -f lavfi -i 'sine=f=5000:d=0.03' "
-    f"-af 'volume=3.0' "
-    f"-ar 44100 {SFX_DIR}/tick.wav")
-
-# 数据卡片
-run(f"ffmpeg -y -f lavfi -i 'sine=f=1500:d=0.15' "
-    f"-af 'volume=3.0' "
-    f"-ar 44100 {SFX_DIR}/blip.wav")
-
-# 结尾收束
-run(f"ffmpeg -y -f lavfi -i 'sine=f=523:d=1.2' "
-    f"-af 'volume=2.0' "
-    f"-ar 44100 {SFX_DIR}/chime.wav")
+ffmpeg("-f", "lavfi", "-i", "sine=f=1000:d=0.12", "-af", "volume=3.0", "-ar", "44100", "sfx/pop.wav")
 ```
+
+实测（FFmpeg 8.0.1）max_volume：whoosh 0.0 dB、typing_key 约 -3～-5 dB（噪声源随机）、pop/tick/blip -8.5 dB、chime -12.0 dB。
 
 ### 音量验证（必须！）
 
-每个 SFX 生成后必须检查音量：
+`gen_sfx.py` 生成后自动检查，单独检查用 `examples/volume.py`，或：
 
 ```bash
 for f in sfx/*.wav; do
-  max=$(ffmpeg -i "$f" -af volumedetect -f null /dev/null 2>&1 \
+  max=$(ffmpeg -hide_banner -i "$f" -af volumedetect -f null - 2>&1 \
     | grep max_volume | sed 's/.*max_volume: //')
-  echo "$(basename $f): $max"
+  echo "$(basename "$f"): $max"
 done
 ```
 
-目标：SFX max > -10 dB。如果低于 -15 dB，说明 FFmpeg 合成源振幅太低，需要提高 `a=` 参数或加 `volume=` 滤镜。
+注意输出目标 `-f null -` 末尾的 `-` 不能省：省掉后 ffmpeg 报 `At least one output file must be specified`，grep 什么也拿不到，验证形同虚设。
+
+目标：SFX max > -15 dB（最好 > -10 dB）。低于 -15 dB 说明合成源振幅太低，需要提高 `a=` 参数或加 `volume=` 滤镜。
 
 ### BGM 素材
 
@@ -464,13 +428,15 @@ done
 - [Mixkit](https://mixkit.co/music/) — 免费商用，无需署名
 - [Pixabay Music](https://pixabay.com/music/) — 免费商用
 
-下载后处理：
+下载后处理（时长按 `scenes.json` 的总时长替换 24 / 21）：
 
 ```bash
 ffmpeg -y -i bgm-source.mp3 \
-  -af "atrim=0:24,asetpts=PTS-STARTPTS,volume=0.08,afade=t=in:d=2,afade=t=out:st=21:d=3" \
-  -ar 44100 -ac 1 bgm.wav
+  -af "atrim=0:24,asetpts=PTS-STARTPTS,afade=t=in:d=2,afade=t=out:st=21:d=3" \
+  -ar 44100 -ac 2 bgm.wav
 ```
+
+BGM 的音量（默认 0.08）在 `mix.py --bgm-vol` 里统一调，这里不再乘 `volume=`，避免两处叠乘。
 
 **不要删除 BGM 源文件**。混音脚本每次修改都需要重新生成，源文件丢了就得重新下载（可能下到不同版本）。
 
@@ -478,67 +444,74 @@ ffmpeg -y -i bgm-source.mp3 \
 
 ## Step 6: 最终混音 + 替换音轨
 
-### 混音策略：逐条叠加（Incremental Overlay）
+### amix 的 normalize 到底做了什么（实测）
 
-**不要用 amix 多路归一化**。amix 的 `normalize=0` 不是"不缩放"——它仍然按 1/N 缩放每个输入。N=45 时每个 SFX 被压到 1/45 ≈ 0.022 倍，等于静音。
+用 1 kHz 测试音（单独 max_volume -24.1 dB）与 N-1 路静音做 amix，再用 volumedetect 量（FFmpeg 8.0.1，脚本见下）：
 
-正确方案：从静音底轨开始，每次只叠一条 SFX（2 路 amix）：
+| 输入数 N | `normalize=1`（默认） | `normalize=0` |
+|---------|----------------------|---------------|
+| 2 | -30.1 dB（×1/2） | -24.1 dB（不变） |
+| 5 | -38.1 dB（×1/5） | -24.1 dB（不变） |
+| 10 | -44.1 dB（×1/10） | -24.1 dB（不变） |
+| 45 | -57.1 dB（×1/45） | -24.1 dB（不变） |
 
-```python
-import subprocess, os
+再测串联：2 路 amix 连续叠 45 次，`normalize=0` 结果仍为 -24.1 dB；而 `normalize=1` 只串 10 次就掉到 -84.3 dB（每次 -6 dB）。
 
-DURATION = 23.352
-SFX_DIR = "./sfx"
-VOICEOVER = "voiceover.mp3"
-SFX_VOL = 0.5
+结论：
 
-SCHEDULE = [
-    (0.0, "whoosh.wav"),
-    (4.0, "whoosh.wav"),
-    (4.5, "typing_key.wav"), (4.9, "typing_key.wav"), (5.3, "typing_key.wav"),
-    # ... 更多 SFX 事件
-]
+- **`normalize=0` 完全不缩放**，各路直接相加。早期版本文档说它「仍按 1/N 缩放」是错的；1/N 缩放是默认的 `normalize=1`，以及 **FFmpeg 4.4 之前**的 amix（那时没有 `normalize` 选项，无法关闭缩放）。
+- `normalize` 选项从 **FFmpeg 4.4** 起才有（4.3 源码中没有）。最低要求 FFmpeg ≥ 4.4；`examples/mix.py` 启动时会用 `ffmpeg -h filter=amix` 检查，没有就直接报错退出。
+- 因此不需要「逐条叠加」：**一次 amix 把配音、BGM、全部 SFX 混起来，`normalize=0`，最后接 `alimiter` 防削波**即可。这比逐条叠加少 N 次中间文件读写，也不会出现「旧文档里每步都用 2 路 amix 却又声称会被 1/N 压扁」的自相矛盾。
+- 不要在没有 `normalize=0` 的旧版本上用逐条 2 路 amix：每叠一次整条轨道就被减半，最先叠进去的 SFX 会被压到 2^-N。
 
-def run(cmd):
-    subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
+复现脚本（造测试音 → 混音 → volumedetect）：
 
-# 1. 生成静音底轨
-run(f"ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=mono -t {DURATION} -c:a pcm_s16le /tmp/silence.wav")
-
-# 2. 逐条叠加 SFX
-current = "/tmp/silence.wav"
-for idx, (time, sfx) in enumerate(SCHEDULE):
-    delay_ms = int(time * 1000)
-    out = f"/tmp/sfx_step_{idx:03d}.wav"
-    run(f"ffmpeg -y -i {current} -i {SFX_DIR}/{sfx} "
-        f"-filter_complex "
-        f"'[1]adelay={delay_ms}|{delay_ms},volume={SFX_VOL},apad=whole_dur={DURATION}[sfx];"
-        f"[0][sfx]amix=inputs=2:duration=first:normalize=0' "
-        f"-ar 44100 -ac 1 {out}")
-    current = out
-
-# 3. voiceover + BGM
-run(f"ffmpeg -y -i {VOICEOVER} -i bgm.wav "
-    f"-filter_complex "
-    f"'[1]atrim=0:{DURATION},asetpts=PTS-STARTPTS,volume=0.08,aresample=44100[bgm];"
-    f"[0]aresample=44100[vo];"
-    f"[vo][bgm]amix=inputs=2:duration=first:normalize=0' "
-    f"-ar 44100 -ac 1 /tmp/vo_bgm.wav")
-
-# 4. 最终合并
-run(f"ffmpeg -y -i /tmp/vo_bgm.wav -i {current} "
-    f"-filter_complex "
-    f"'[0][1]amix=inputs=2:duration=first:normalize=0,"
-    f"alimiter=limit=0.9:attack=5:release=50' "
-    f"-ar 44100 -ac 1 mixed-audio.wav")
+```bash
+ffmpeg -y -f lavfi -i "sine=f=1000:d=1,volume=0.5" -ar 44100 tone.wav
+ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=mono -t 1 sil.wav
+for n in 0 1; do
+  ffmpeg -y -i tone.wav -i sil.wav -i sil.wav -i sil.wav -i sil.wav \
+    -filter_complex "amix=inputs=5:duration=first:normalize=$n" out_$n.wav
+  ffmpeg -hide_banner -i out_$n.wav -af volumedetect -f null - 2>&1 | grep max_volume
+done
 ```
+
+### 混音实现
+
+脚本：[`examples/mix.py`](examples/mix.py)。SFX 时间表放在 JSON 里（`examples/sfx_schedule.example.json`），和 `scenes.json` 一起维护：
+
+```json
+[[0.0, "whoosh"], [4.0, "whoosh"], [4.5, "typing_key"], [19.4, "blip"], [22.0, "chime"]]
+```
+
+生成的 filter_complex 结构（同一个 SFX 用多次时先 `asplit`）：
+
+```
+[0:a]aresample=44100[vo];
+[1:a]asplit=2[sp1_0][sp1_1];
+[sp1_0]aresample=44100,adelay=0:all=1,volume=0.5[x0];
+[sp1_1]aresample=44100,adelay=4000:all=1,volume=0.5[x1];
+...
+[N:a]atrim=0:<配音时长>,asetpts=PTS-STARTPTS,volume=0.08,aresample=44100[bgm];
+[vo][x0][x1]...[bgm]amix=inputs=K:duration=first:normalize=0,alimiter=limit=0.9:attack=5:release=50[out]
+```
+
+```bash
+python examples/mix.py build/voiceover.mp3 --schedule sfx_schedule.json --bgm bgm.wav -o build/mixed-audio.wav
+```
+
+### 声道：默认立体声
+
+早期版本最终混音用 `-ac 1`（单声道），原因只是 edge-tts 输出单声道、合成 SFX 也是单声道，省事省体积。但 BGM 素材通常是立体声，`-ac 1` 会把它折叠成单声道，部分素材左右声道相位相反时还会互相抵消变小声。
+
+现在 `mix.py` 默认输出立体声（`-ac 2`）：单声道配音和 SFX 自动复制到左右声道，听感与单声道一致，BGM 保留立体声。确实需要单声道（比如极端在意体积）时加 `--mono`。
 
 ### 音轨替换
 
 ```bash
-ffmpeg -y -i output.mp4 -i mixed-audio.wav \
+ffmpeg -y -i build/output.mp4 -i build/mixed-audio.wav \
   -c:v copy -c:a aac -b:a 192k \
-  -map 0:v:0 -map 1:a:0 final.mp4
+  -map 0:v:0 -map 1:a:0 build/final.mp4
 ```
 
 **`-c:v copy` 不重新编码视频流**，只替换音频。如果重新编码会破坏已烘焙的中文字符渲染。
@@ -546,12 +519,15 @@ ffmpeg -y -i output.mp4 -i mixed-audio.wav \
 ### 混音后验证
 
 ```bash
-# 对比混音前后
-ffmpeg -i mixed-audio.wav -af volumedetect -f null 2>&1 | grep max_volume
-ffmpeg -i voiceover.mp3 -af volumedetect -f null 2>&1 | grep max_volume
+# 对比混音前后（注意 -f null - 末尾的 -）
+ffmpeg -hide_banner -i build/mixed-audio.wav -af volumedetect -f null - 2>&1 | grep max_volume
+ffmpeg -hide_banner -i build/voiceover.mp3  -af volumedetect -f null - 2>&1 | grep max_volume
+# 或：python examples/volume.py build/voiceover.mp3 build/mixed-audio.wav
 # 差值 > 1 dB → SFX/BGM 成功混入
-# 差值 < 0.1 dB → 混音失败，SFX/BGM 被 amix 吞了
+# 差值 < 0.1 dB → 混音失败，SFX/BGM 没进去（检查时间表、文件路径）
 ```
+
+实测（合成配音 -24.5 dB + 示例 SFX 时间表）：mixed-audio -7.2 dB，SFX 确实混入。
 
 ---
 
@@ -603,6 +579,8 @@ cubic-bezier(0.25, 0.46, 0.45, 0.94)
 ---
 
 ## 组件库
+
+> 下面的 CSS `animation`（`.show`、`cursor-blink`、`pulse` 等 `infinite` 循环）只适合在浏览器里预览样式。逐帧出片时它们跟真实时钟走、不可复现，必须改成在 `seekTo(t)` 里按 t 计算（入场用 Step 3 的 `reveal()`；光标闪烁用 `Math.floor(t / 0.35) % 2`；脉冲用 `Math.sin(2 * Math.PI * t / 2)` 算 box-shadow）。
 
 ### 终端窗口
 
@@ -732,10 +710,10 @@ cubic-bezier(0.25, 0.46, 0.45, 0.94)
 </div>
 ```
 
-数字从 0 滚动到目标值，进度条同步填充。JS 逐帧计算：
+数字从 0 滚动到目标值，进度条同步填充。在 `seekTo(t)` 里按 t 计算（`startTime` 为卡片在场景内的出现时刻）：
 
 ```js
-let p = Math.min(1, (t - startTime) / 1.5);
+let p = Math.min(1, Math.max(0, (t - startTime) / 1.5));
 document.getElementById('mv0').textContent = Math.round(p * 10) + 'x';
 document.getElementById('mb0').style.width = (p * 100) + '%';
 ```
@@ -834,10 +812,10 @@ document.getElementById('mb0').style.width = (p * 100) + '%';
 /* 错 — headless Chromium 静默失败，中文变方块 */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC...');
 
-/* 对 — 本地 @font-face */
+/* 对 — 本地 @font-face，相对 HTML 的路径 */
 @font-face {
   font-family: 'LXGW WenKai';
-  src: url('file:///home/YOUR_USER/.local/share/fonts/LXGWWenKai-Regular.ttf') format('truetype');
+  src: url('fonts/LXGWWenKai-Regular.ttf') format('truetype');
 }
 ```
 
@@ -857,16 +835,9 @@ document.getElementById('mb0').style.width = (p * 100) + '%';
 
 ### 1. amix 1/N 缩放陷阱
 
-`amix normalize=0` 不是"不缩放"。它禁用了自动防削波归一化，但仍然按 1/N 缩放每个输入。
+amix **默认**（`normalize=1`，以及 FFmpeg 4.4 之前没有该选项的版本）按 1/N 缩放每个输入：45 路时每路只剩 1/45 ≈ -33 dB，SFX 基本听不见。
 
-| amix 输入数 | 每输入缩放 | 效果 |
-|-------------|-----------|------|
-| 2 | 1/2 = 0.50 | 可接受 |
-| 5 | 1/5 = 0.20 | 偏安静 |
-| 10 | 1/10 = 0.10 | 很安静 |
-| 45 | 1/45 = 0.022 | 等于静音 |
-
-**解决**：逐条叠加，每次 amix 只有 2 个输入。
+**解决**：FFmpeg ≥ 4.4，单次 amix 加 `normalize=0`（实测完全不缩放，见 Step 6 的测试表），末尾接 `alimiter` 防削波。旧文档说「`normalize=0` 仍按 1/N 缩放」是错误结论，已按实测更正。
 
 ### 2. FFmpeg 合成源默认极静
 
@@ -886,7 +857,7 @@ FFmpeg tremolo filter 的 `f` 参数最小值 0.1，低于此值报 `Numerical r
 
 ### 6. 场景边界改变时 SFX 必须同步
 
-改 capture 脚本的场景边界 → 同时改 mix 脚本的 SFX 时间表。不改 = 音效和画面不同步。
+场景边界只在 `scenes.json` 里改，`capture.py` 和 HTML 都从它读；SFX 时间表（`sfx_schedule.json`）要跟着同步改。不改 = 音效和画面不同步。
 
 ### 7. BGM 源文件不要删除
 
@@ -894,15 +865,15 @@ FFmpeg tremolo filter 的 `f` 参数最小值 0.1，低于此值报 `Numerical r
 
 ### 8. 混音后必须验证
 
-对比 mixed-audio 和 voiceover 的 volumedetect 输出。如果 max_volume 差值 < 0.1 dB，说明 SFX/BGM 根本没混进去。
+对比 mixed-audio 和 voiceover 的 volumedetect 输出（命令必须是 `-f null -`，缺了末尾的 `-` ffmpeg 直接报错，什么都量不到）。如果 max_volume 差值 < 0.1 dB，说明 SFX/BGM 根本没混进去。
 
 ### 9. 改动隔离
 
 用户说"在这个基础上改 X"时，只改 X，不动其他东西。即使逻辑上"顺便优化一下 Y"更合理。
 
-### 10. npm 在 WSL + Windows 跨文件系统下极慢
+### 10. WSL 跨文件系统 IO 极慢
 
-不要在 /mnt/c/ 下运行 npm。用 Linux 原生文件系统（~/ 或 /tmp/）。
+本流程本身不用 npm，但截帧会写几千个 PNG。在 WSL 里不要把工作目录或帧输出放在 `/mnt/c/` 这类 Windows 盘上（npm、pip 安装同理），用 Linux 原生文件系统（`~/` 或 `/tmp/`），最后只把成片拷回 Windows。
 
 ---
 
@@ -916,11 +887,13 @@ FFmpeg tremolo filter 的 `f` 参数最小值 0.1，低于此值报 `Numerical r
 | 中文字体 | LXGW WenKai（本地 @font-face） |
 | 英文字体 | JetBrains Mono（代码） + ChakraPetch（标题） |
 | 字幕 | 64px，底部居中，半透明黑底白字圆角气泡 |
-| TTS | edge-tts zh-CN-XiaoxiaoNeural，不加 --rate |
+| TTS | edge-tts zh-CN-XiaoxiaoNeural，`--file` 传稿，不加 --rate |
 | BGM | ambient electronic, volume=0.08, 2s fade-in 3s fade-out |
 | SFX 音量 | volume=0.5 |
 | 缓动函数 | cubic-bezier(0.16, 1, 0.3, 1) |
-| 混音策略 | 逐条叠加（incremental overlay） |
+| 混音策略 | 单次 amix `normalize=0` + `alimiter=limit=0.9`（FFmpeg ≥ 4.4） |
+| 混音声道 | 立体声 `-ac 2`（`--mono` 可选） |
+| 场景时间 | `scenes.json` 单一来源 |
 
 ---
 
@@ -933,7 +906,7 @@ node scripts/validate-manifest.mjs   # 校验清单结构、文件存在性、fr
 node --test test/*.test.mjs          # 校验脚本自身的单测
 ```
 
-CI（`.github/workflows/validate.yml`）在每次推送时自动运行。第三方依赖与授权说明见 [NOTICE.md](NOTICE.md)。
+CI（`.github/workflows/validate.yml`）在每次推送时自动运行：校验清单，并对 `examples/*.py` 做 `py_compile`、单测和 SFX 冒烟测试。第三方依赖与授权说明见 [NOTICE.md](NOTICE.md)。
 
 ---
 
