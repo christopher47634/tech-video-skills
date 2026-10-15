@@ -17,3 +17,19 @@ jobs:
         run: node scripts/validate-manifest.mjs
       - name: 单元测试
         run: node --test test/*.test.mjs
+
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 编译检查 examples/*.py
+        run: python -m py_compile examples/*.py
+      - name: examples 单元测试
+        run: python -m unittest discover -s examples -v
+      - name: 安装 ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: 冒烟：合成 SFX 并校验音量
+        run: cd examples && python gen_sfx.py --out-dir "$RUNNER_TEMP/sfx"
