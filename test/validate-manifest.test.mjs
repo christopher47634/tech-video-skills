@@ -27,4 +27,6 @@ test("manifest 各类错误", () => {
   assert.ok(validateManifest({ version: "1.0.0", skills: [entry({ type: "x" })] }, read).some((e) => e.includes("type")));
   assert.ok(validateManifest({ version: "1.0.0", skills: [entry()] }, () => null).some((e) => e.includes("不存在")));
   assert.ok(validateManifest({ version: "1.0.0", skills: [entry({ type: "skill" })] }, read).some((e) => e.includes("frontmatter")));
+  assert.ok(validateManifest({ version: "1.0.0", skills: [entry({ path: "../escape.md" })] }, read).some((e) => e.includes("相对路径")));
+  assert.ok(validateManifest({ version: "1.0.0", skills: [entry({ path: "dir\\file.md" })] }, read).some((e) => e.includes("相对路径")));
 });

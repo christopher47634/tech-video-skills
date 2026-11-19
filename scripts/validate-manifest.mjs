@@ -49,9 +49,13 @@ export function validateManifest(manifest, readFile) {
     }
     if (s.type && !["doc", "skill"].includes(s.type)) errs.push(`${tag}: type 只能是 doc 或 skill`);
     if (s.path) {
-      const text = readFile(s.path);
-      if (text === null) errs.push(`${tag}: path "${s.path}" 文件不存在`);
-      else if (s.type === "skill") errs.push(...validateFrontmatter(text, s.path));
+      if (s.path.includes("\\") || s.path.startsWith("/") || /(^|\/)\.\.(\/|$)/.test(s.path)) {
+        errs.push(`${tag}: path "${s.path}" 必须是使用 / 的仓库内相对路径，不能含 .. 或绝对路径`);
+      } else {
+        const text = readFile(s.path);
+        if (text === null) errs.push(`${tag}: path "${s.path}" 文件不存在`);
+        else if (s.type === "skill") errs.push(...validateFrontmatter(text, s.path));
+      }
     }
     if (s.tags !== undefined && !(Array.isArray(s.tags) && s.tags.every((t) => typeof t === "string"))) errs.push(`${tag}: tags 必须是字符串数组`);
   });
