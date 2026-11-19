@@ -35,6 +35,20 @@ class TestVtt(unittest.TestCase):
         finally:
             os.remove(p)
 
+    def test_note_block_skipped_and_inverted_or_bad_ts_rejected(self):
+        with self.assertRaises(ValueError):
+            ts_to_sec("00:65:00.000")
+        p_note = _write("\ufeffWEBVTT\n\nNOTE 00:00:00.000 --> 00:00:01.000\n忽略注释\n\n"
+                        "00:00:01.000 --> 00:00:02.000\n正文\n")
+        p_inv = _write("WEBVTT\n\n00:00:02.000 --> 00:00:01.000\n倒挂\n")
+        try:
+            self.assertEqual(parse_vtt(p_note), [[1.0, 2.0, "正文"]])
+            with self.assertRaises(ValueError):
+                parse_vtt(p_inv)
+        finally:
+            os.remove(p_note)
+            os.remove(p_inv)
+
 
 if __name__ == "__main__":
     unittest.main()
